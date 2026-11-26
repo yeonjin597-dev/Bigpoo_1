@@ -1,0 +1,12 @@
+# 원본·큰 파일·개인정보(상호·주소)가 들어간 파일은 올리지 않음
+data/
+out/*.pkl
+out/*.parquet
+out/*정답*
+out/*분배표*
+out/*로드뷰*
+sheets/
+__pycache__/
+.venv/
+*.env
+_내할일*
