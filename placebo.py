@@ -1,5 +1,5 @@
 """
-위약(placebo) 검증 (코딩 3) — python placebo.py [--n 100] [--workers 4] → out/1128_위약검증_코딩3.xlsx + out/fig_위약_*.png
+위약(placebo) 검증 (코딩 3) — python placebo.py [--n 100] [--workers 4] [--tag v2] → out/1128_위약검증_코딩3[_v2].xlsx + out/fig_위약_격자셔플[_v2].png
 
 주분석과 같은 조건: analysis_main.cox() (statsmodels PHReg, Breslow, 칸 군집 강건 SE), cox_models.prepare(),
   표본 = single_unit_site & M3 변수까지 결측 없음 & 생존기간 > 0 (analysis_main.main()의 d와 동일), 통제 = M2.
@@ -10,8 +10,8 @@
   [D] 다른 업종: 일반음식점 KAN과 휴게음식점 칸 테이블에 같은 단순 모형
 셔플은 회당 약 3분 → --workers개 하위 프로세스(BLAS 스레드 1개씩)가 out/shuffle_log_w{k}.csv에 매회 append,
   끝나면(또는 중단·재실행 때) out/shuffle_log.csv로 합친다. 이미 끝난 회차는 건너뛴다.
-  각 회차는 seed=[SEED, 회차]로 섞으므로 중간에 끊겨도 결과가 같다. 로그에는 입력 파일·seed가 함께 적혀
-  설정이 바뀌면(예: 양도 규칙을 바꾼 TABLE) 이전 행은 쓰지 않는다.
+  각 회차는 seed=[SEED, 회차]로 섞으므로 중간에 끊겨도 결과가 같다. 로그에는 입력 파일 이름+내용 md5와 seed가
+  함께 적혀, 설정이 바뀌면(예: 양도 규칙을 바꾼 TABLE, 이름이 같아도) 이전 행은 쓰지 않는다.
 상호·주소(칸ID·지번)는 저장하지 않는다 (요약 수치만).
 """
 import argparse
@@ -26,12 +26,13 @@ import pandas as pd
 # ───────────── 설정 (양도 규칙이 바뀌면 파일만 바꿔서 다시 실행) ─────────────
 TABLE = 'out/analysis_table_v2.parquet'
 KAN = 'out/1126_칸테이블_가게단위_일반음식점.parquet'
-HUGE = 'data/휴게음식점_원본.csv'
+HUGE = 'data/서울시 휴게음식점 인허가 정보.csv'
 N_SHUFFLE = 100
 WORKERS = 1          # 셔플 병렬 워커 수 (워커당 메모리 약 0.8GB, BLAS 스레드 1개)
 SEED = 42            # 회차 i는 np.random.default_rng([SEED, i])
 OUT_XLSX = 'out/1128_위약검증_코딩3.xlsx'
 SHUFFLE_LOG = 'out/shuffle_log.csv'
+TAG = ''             # --tag v2 → 결과 파일명 끝에 _v2 (xlsx·png·shuffle_log)
 FIG_PREFIX = 'out/fig_위약_'
 GRID = '격자ID'
 
@@ -46,6 +47,24 @@ EXPO = 'prior_closures'
 def p_(path):
     p = Path(path)
     return p if p.is_absolute() else BASE / p
+
+
+def tagged(path, tag):
+    """'out/a.xlsx' + 'v2' → 'out/a_v2.xlsx' (tag 없으면 그대로)."""
+    if not tag:
+        return path
+    p = Path(path)
+    return str(p.with_name(f'{p.stem}_{tag}{p.suffix}'))
+
+
+def table_key(path):
+    """로그의 설정 구분용: 파일 이름 + 내용 md5 앞 8자리 (이름이 같아도 내용이 바뀌면 옛 셔플을 재사용하지 않음)."""
+    import hashlib
+    h = hashlib.md5()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return f'{Path(path).name}@{h.hexdigest()[:8]}'
 
 
 def judge(row, rule):
@@ -142,8 +161,8 @@ def run_shuffle(n, seed, table_name, workers, a):
         procs = []
         for w in range(workers):
             items = todo[w::workers]
-            cmd = [sys.executable, str(Path(__file__).resolve()), '--table', a.table,
-                   '--worker-id', str(w), '--items', ','.join(map(str, items))]
+            cmd = [sys.executable, str(Path(__file__).resolve()), '--table', a.table, '--tag', a.tag,
+                   '--table-key', table_name, '--worker-id', str(w), '--items', ','.join(map(str, items))]
             procs.append(subprocess.Popen(cmd, env=env, cwd=str(BASE)))
         try:
             codes = [p.wait() for p in procs]
@@ -254,17 +273,25 @@ def main():
     ap.add_argument('--kan', default=KAN)
     ap.add_argument('--huge', default=HUGE)
     ap.add_argument('--workers', type=int, default=WORKERS, help='셔플 병렬 워커 수 (워커당 약 0.8GB)')
+    ap.add_argument('--tag', default=TAG, help='결과 파일명 끝에 붙일 이름 (예: v2 → _v2.xlsx)')
+    ap.add_argument('--table-key', default=None, help=argparse.SUPPRESS)             # 내부용
     ap.add_argument('--worker-id', type=int, default=None, help=argparse.SUPPRESS)   # 내부용
     ap.add_argument('--items', default='', help=argparse.SUPPRESS)                   # 내부용
     a = ap.parse_args()
+    global OUT_XLSX, SHUFFLE_LOG, FIG_PREFIX
+    OUT_XLSX, SHUFFLE_LOG = tagged(OUT_XLSX, a.tag), tagged(SHUFFLE_LOG, a.tag)
+    fig_shuffle_path = tagged(FIG_PREFIX + '격자셔플.png', a.tag)
     table, kan_path, huge_path = p_(a.table), p_(a.kan), p_(a.huge)
     t_all = time.time()
     if a.worker_id is not None:                                    # 워커 모드: 받은 회차만 돌리고 끝
         d, M2 = load_main(table)
         items = [int(s) for s in a.items.split(',') if s]
-        shuffle_items(d, M2, items, SEED, worker_log(a.worker_id), Path(a.table).name, tag=f'[w{a.worker_id}] ')
+        shuffle_items(d, M2, items, SEED, worker_log(a.worker_id), a.table_key or table_key(table),
+                      tag=f'[w{a.worker_id}] ')
         return
     d, M2 = load_main(table)
+    key = table_key(table)
+    print(f'설정 키 {key}  → {OUT_XLSX}, {fig_shuffle_path}, {SHUFFLE_LOG}', flush=True)
     res, report = {}, []
 
     # 실제 HR (= 주분석 M2)
@@ -275,7 +302,7 @@ def main():
                    '판정': '기준', '판정 기준': '-'})
 
     # [A]
-    log = run_shuffle(a.n, SEED, Path(a.table).name, a.workers, a)
+    log = run_shuffle(a.n, SEED, key, a.workers, a)
     hrs = log['HR'].to_numpy()
     p_rank = (1 + int((hrs >= real['HR']).sum())) / (len(hrs) + 1)
     res['A 셔플 요약'] = pd.DataFrame({'항목': ['실제 HR', '셔플 횟수', '셔플 HR 평균', '셔플 HR 2.5%', '셔플 HR 97.5%',
@@ -331,12 +358,12 @@ def main():
 
     # 그림
     plt = setup_font()
-    fig_shuffle(plt, hrs, real['HR'], p_(FIG_PREFIX + '격자셔플.png'))
+    fig_shuffle(plt, hrs, real['HR'], p_(fig_shuffle_path))
 
     # 저장 (요약 수치만: 상호·주소·칸ID 없음)
     rep = pd.DataFrame(report).rename(columns={'events': '사건 수'})
     note = pd.DataFrame({'항목': ['입력', '표본', '모형', '통제 (M2)', 'A', 'B', 'C', 'D', '재현'], '내용': [
-        f'TABLE={a.table} | KAN={a.kan} | HUGE={a.huge}',
+        f'TABLE={a.table} ({key}) | KAN={a.kan} | HUGE={a.huge} | 양도 규칙 = lineage D9 (60일 + 같은 상호)',
         f'single_unit_site & M3 변수 결측 없음 & 생존기간>0: {len(d):,}곳, 폐업 {int(d["event_ours"].sum()):,}건 (주분석과 동일)',
         'analysis_main.cox (PHReg, Breslow, 칸 군집 강건 SE), 동네 고정효과(strata) 없음',
         '업태 더미 + 개업연도 더미 + log 면적 + 칸 경과 연수 + 100m 육각형 3년 폐업률 + 밀도 + 밀도²',
@@ -344,7 +371,7 @@ def main():
         '노출을 다른 층 폐업 수로 바꿈 / 둘 다 넣음',
         '같은 격자 다른 가게들의 prior_closures 평균(자기 제외). 격자에 가게 1곳이면 결측 → 표본에서 빠짐',
         '코호트여부 & 칸_동시영업최대==1, 노출 이전폐업수, 통제 = 개업연도 + 업태(1000건 미만 기타), 군집 칸ID',
-        f'python placebo.py --n {a.n}  (셔플은 {SHUFFLE_LOG}에서 이어서 함)']})
+        f'python placebo.py --n {a.n}' + (f' --tag {a.tag}' if a.tag else '') + f'  (셔플은 {SHUFFLE_LOG}에서 이어서 함)']})
     out = p_(OUT_XLSX)
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         rep.round(4).to_excel(w, sheet_name='보고 표', index=False)
