@@ -27,9 +27,11 @@ import lineage as L
 BASE = Path(__file__).resolve().parent
 KAN = 'out/1126_칸테이블_가게단위_일반음식점.parquet'
 TABLE = 'out/analysis_table_v2.parquet'
-RESULT = 'out/1127_본분석_v1.xlsx'
-HR = 1.20            # 이전 폐업 1회당 위험비 (본분석 M2)
-HR_PLACEBO = 1.16    # 동네 몫을 뺀 1회당 위험비 (위약 검증)
+RESULT = 'out/1127_본분석_v1.xlsx'     # '효과 크기' 시트에서 0번 기준 생존율 S0(1·3·5년)을 읽음
+HR = 1.17            # 이전 폐업 1회당 위험비 (본분석 M2, 양도 규칙 D9 기준, 95% CI 1.12~1.21)
+HR_PLACEBO = 1.14    # 동네 몫을 뺀 1회당 위험비 (위약 검증 C, 1.1437 [1.1083, 1.1802])
+                     #   출처: out/1128_위약검증_코딩3_v2.xlsx '보고 표' 'C 동네 평균 통제' (D9, --n 100)
+TRANSFER_TEXT = f'폐업 후 {L.TRANSFER_DAYS}일 안에 같은 상호 재입점'   # 양도 규칙 (lineage D9)
 WINDOW_DAYS = L.WINDOW_DAYS   # 최근 3년 = 1,095일
 SHORT_DAYS = 30               # 생존 30일 미만 폐업 = 초단기·임시 영업 의심
 DEMO_SEED = 42
@@ -192,7 +194,7 @@ def show_kan(D, kan_id, anon):
         line = ' '.join(pad(c, w, right=(i in (0, 4))) for i, (c, w) in enumerate(zip(cells, W)))
         mark = '  (초단기·임시 영업 의심)' if r['초단기'] else ''
         print(' ' + line + f"  {int(r['이전폐업수']):>4}" + mark)
-    print(' (생존일수 + = 영업 중, 데이터 기준일까지 · 양도 = 폐업 후 30일 안에 같은 칸 재입점, 폐업으로 안 셈')
+    print(f' (생존일수 + = 영업 중, 데이터 기준일까지 · 양도 = {TRANSFER_TEXT}, 폐업으로 안 셈')
     print('  이전폐업 = 그 가게 개업 직전 3년, 같은 칸, 다른 상호의 진짜 폐업 수)')
 
     # 2) 요약
