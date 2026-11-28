@@ -30,6 +30,7 @@ pip install -r requirements.txt
 | 5 | `python figures.py` | 결과 그림 6개 (본분석 엑셀만 읽음) | `fig_*.png` |
 | 6 | `python score_transfer.py <판정1> [<판정2>]` | 양도 판정 채점 (구 30일 규칙 vs 사람 판정) | `1127_양도판정_채점.xlsx` |
 | 7 | `python sens_short.py` | 초단기 영업(14~90일 미만) 계보 제외 민감도 (D11) | `1127_민감도_초단기제외.xlsx` |
+| 7-2 | `python explore_region.py` → `explore_region2.py` → `explore_region3.py` → `figures_region.py` | 지역 차이 심화 (동네 특성 3분위, 구별, 사례 동네, 성장/쇠퇴, 번화가 vs 조용한 동네, 탐색적) | `1128_지역차이_심화.xlsx`, `1128_동네활성도.xlsx`, `fig_지역차이_*.png` |
 | 8 | `python placebo.py` (코딩 3) | 위약 검증 4개. 휴게음식점 원본을 `data/휴게음식점_원본.csv`로 넣어야 함 | `1128_위약검증_코딩3.xlsx` |
 | 9 | `python main.py "마포구 서교동 123-4 1층"` (코딩 3) | 주소 → 칸 계보 조회 (화면 출력만, `--anon` 익명 모드) | — |
 | (구) | `python cox_models.py` | Cox M0~M4 (⚠ 아직 1차본, 같은 건물 층화 M3·M4가 느려서 개선 예정) | `1125_Cox_M0toM4_v0.xlsx` |
