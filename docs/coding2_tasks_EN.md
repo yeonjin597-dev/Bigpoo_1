@@ -1,5 +1,8 @@
 # Coding 2 — Tasks
 
+> **Status (Nov 27 night):** Tasks 1–5 were completed by Coding 1. The Check numbers are from v1 (30-day transfer rule); after the rule change (D9) see `docs/결과요약_1127.md`.
+
+
 Hi! Coding 1 built the data pipeline and ran the main Cox models (`analysis_main.py`).
 Your part is **checking the results, describing the data, drawing all figures, and scoring the transfer judgments**.
 

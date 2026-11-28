@@ -156,7 +156,8 @@ def main():
     coh = lin[lin['관리번호'].isin(d['license_id'])].copy()
     coh['row'] = np.arange(len(coh))
     rq3 = []
-    for k, lab in [('ours', '우리 (같은 칸 30일 안 재입점 = 양도)'), ('jari', 'jari (같은 상호 60일 안)'), ('parsa', 'Parsa (모든 교체 = 폐업)')]:
+    for k, lab in [('ours', '우리 (60일 안 같은 상호 재입점 = 양도, D9)'), ('days30', '구 규칙 (30일 안 아무 가게 재입점 = 양도)'),
+                   ('jari', 'jari (같은 상호 60일 안, 상호 완전 일치)'), ('parsa', 'Parsa (모든 교체 = 폐업)')]:
         coh[f'X_{k}'] = L.count_prior(coh, lin[lin[f'event_{k}']], 'site')
         dd = d.merge(coh[['관리번호', f'X_{k}', f'event_{k}']].rename(columns={'관리번호': 'license_id', f'event_{k}': f'ev_{k}'}), on='license_id')
         dd[f'ev_{k}'] = dd[f'ev_{k}'].astype(int)
@@ -282,8 +283,9 @@ def main():
     from kan_table import make_kan_table
     raw = pd.read_pickle(OUT / 'raw_parsed.pkl')
     raw = raw[raw['지번주소'].fillna('').str.startswith('서울특별시') | raw['도로명주소'].fillna('').str.startswith('서울특별시')]
-    for lab, kw in [('양도 기간 0일', dict(transfer_days=0)), ('양도 기간 60일', dict(transfer_days=60)),
-                    ('양도 기간 90일', dict(transfer_days=90)), ('이전 폐업 창 1년', dict(window_days=365)),
+    for lab, kw in [('양도: 구 규칙 (30일 안 아무 가게)', dict(transfer_rule='days', transfer_days=30)),
+                    ('양도: 같은 상호 30일 안', dict(transfer_days=30)), ('양도: 같은 상호 90일 안', dict(transfer_days=90)),
+                    ('양도: 상호 완전 일치만 (60일)', dict(name_match='strict')), ('이전 폐업 창 1년', dict(window_days=365)),
                     ('이전 폐업 창 5년', dict(window_days=1825))]:
         k_ = make_kan_table(raw, already_standardized=True, **kw)
         k_ = k_[['관리번호', '이전폐업수', '폐업여부', '생존기간']].rename(columns={'관리번호': 'license_id'})

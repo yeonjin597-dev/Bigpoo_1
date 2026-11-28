@@ -39,14 +39,16 @@ COLS = {
 
 
 def make_kan_table(df, transfer_days=L.TRANSFER_DAYS, window_days=L.WINDOW_DAYS,
-                   start=L.LINEAGE_START, cohort=L.COHORT, censor=None, already_standardized=False):
+                   start=L.LINEAGE_START, cohort=L.COHORT, censor=None, already_standardized=False,
+                   transfer_rule=L.TRANSFER_RULE, name_match=L.NAME_MATCH):
     """인허가 원본(pd.read_csv 그대로) → 가게 1행 칸 테이블. 인자를 바꾸면 민감도 분석에도 쓸 수 있다."""
     raw = df if already_standardized else L.standardize(df)
     if 'jibun' not in raw.columns:
         raw = L.add_address(raw)
     if censor is None:
         censor = max(raw['od'].max(), raw['cd'].max())       # 원본의 가장 늦은 날짜
-    lin = L.build_lineage(raw, transfer_days=transfer_days, start=start).copy()
+    lin = L.build_lineage(raw, transfer_days=transfer_days, start=start,
+                          transfer_rule=transfer_rule, name_match=name_match).copy()
     lin['row'] = np.arange(len(lin))
     fails = lin[lin['event_ours']]
     lin['prior_closures'] = L.count_prior(lin, fails, 'site', window_days)

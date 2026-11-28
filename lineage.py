@@ -5,7 +5,8 @@
 실행: python lineage.py   (data/ 폴더에 원본 CSV 2개를 넣고 실행. 자세한 건 README.md)
 결정 사항(결정 기록에 남길 것):
   - 칸 = 지번 + 층, 2010년 이후 인허가로 계보 구성
-  - 양도 = 폐업 후 TRANSFER_DAYS(기본 30일) 안에 같은 칸 재입점 (식품위생법 제39조)
+  - 양도 = 폐업 후 TRANSFER_DAYS(60일) 안에 같은 칸에 **같은 상호(정규화)**가 재입점 (결정 D9: OECD 연속성 기준 + jari 60일 정의,
+    비코딩 1 판정과 대조). 구 규칙(30일 안 아무 가게 재입점, 식품위생법 제39조 지위승계 기간)은 TRANSFER_RULE='days'로 재현
   - 분석 코호트 = 2013~2022년 개업 (3년 창이 전부 2010년 이후에 들어가도록)
   - 이전 폐업 = 개업일 직전 WINDOW_DAYS(기본 1095일) 안, 같은 칸, 다른 상호의 '진짜 폐업'
   - 중도절단 기준일 = 원본에 있는 가장 늦은 날짜(인허가일·폐업일 중 최댓값)
@@ -22,7 +23,9 @@ DATA_IN = BASE / 'data' / '인허가_원본.csv'   # 서울시 일반음식점 �
 SBIZ_IN = BASE / 'data' / '소상공인시장진흥공단_상가_상권_정보_서울_202609.csv'
 COORD_IN = BASE / 'data' / '1125_좌표보충_코딩3.parquet'   # 팀 공통 좌표 (코딩 3). 있으면 이걸 씀
 OUT_DIR = BASE / 'out'                        # 결과 저장 폴더
-TRANSFER_DAYS = 30
+TRANSFER_DAYS = 60                       # D9: 60일 + 같은 상호 (구 규칙은 30일 + 아무 가게)
+TRANSFER_RULE = 'name'                   # 'name' = 같은 상호만 양도 / 'days' = 기간 안 아무 가게 재입점이면 양도 (구 규칙)
+NAME_MATCH = 'loose'                     # 'loose' = 지점명·괄호·영한 표기·어순·앞부분 일치 허용 / 'strict' = 정규화 후 완전 일치
 JARI_DAYS = 60
 WINDOW_DAYS = 1095
 LINEAGE_START = '2010-01-01'
@@ -125,7 +128,8 @@ def add_address(df):
 
 
 # ───────────────────────── 3. 칸 계보 + 실패 정의 ─────────────────────────
-def build_lineage(df, transfer_days=TRANSFER_DAYS, jari_days=JARI_DAYS, start=LINEAGE_START):
+def build_lineage(df, transfer_days=TRANSFER_DAYS, jari_days=JARI_DAYS, start=LINEAGE_START,
+                  transfer_rule=TRANSFER_RULE, name_match=NAME_MATCH):
     """칸(지번+층)별로 가게를 개업 순서로 줄 세우고, 다음 가게와의 간격으로 실패를 정의한다.
     다른 업종(예: 휴게음식점) 데이터에도 같은 함수를 쓴다."""
     d = df[(df['od'] >= start) & df['jibun'].notna() & df['floor'].notna()].copy()
@@ -144,8 +148,19 @@ def build_lineage(df, transfer_days=TRANSFER_DAYS, jari_days=JARI_DAYS, start=LI
     closed = d['cd'].notna()
     d['event_parsa'] = closed
     d['event_jari'] = closed & ~((d['nxt_name'] == d['name']) & gap.between(0, jari_days))
-    d['event_ours'] = closed & ~gap.between(0, transfer_days)
-    d['transfer'] = closed & gap.between(0, transfer_days)
+    raw_name = d['사업장명'] if '사업장명' in d else d['name']
+    d['name_key'] = [''.join(name_tokens(x)) or n for x, n in zip(raw_name, d['name'])]
+    in_window = closed & gap.between(0, transfer_days)
+    if transfer_rule == 'name':        # D9: 기간 안 + 같은 상호만 양도
+        nxt_raw = raw_name.groupby(d['site']).shift(-1)
+        idx = in_window[in_window].index
+        same = pd.Series(False, index=d.index)
+        same.loc[idx] = [same_business_name(a, b, name_match) for a, b in zip(raw_name.loc[idx], nxt_raw.loc[idx])]
+        d['transfer'] = in_window & same
+    else:                              # 구 규칙: 기간 안 아무 가게 재입점
+        d['transfer'] = in_window
+    d['event_ours'] = closed & ~d['transfer']
+    d['event_days30'] = closed & ~gap.between(0, 30)     # 구 규칙 (비교용)
     # 다음 가게가 내 폐업 전에 개업 = 한 층에 가게 여럿(다점포)
     overlap_next = gap < 0
     overlap_prev = (d['od'] - d['prev_cd']).dt.days < 0
@@ -154,12 +169,46 @@ def build_lineage(df, transfer_days=TRANSFER_DAYS, jari_days=JARI_DAYS, start=LI
     return d
 
 
+# ───────────────────────── 상호 연속성 (D9) ─────────────────────────
+_SYN = {'cafe': '카페', 'coffee': '커피'}
+
+
+def name_tokens(s):
+    """상호 → 비교용 토큰: (주)·괄호 제거, 소문자, 특수문자 제거, 끝의 '…점'(지점명) 제거, cafe→카페."""
+    if not isinstance(s, str):
+        return []
+    s = re.sub(r'\(주\)|주식회사|㈜', '', s)
+    s = re.sub(r'\([^)]*\)|\[[^\]]*\]', '', s)
+    t = [re.sub(r'[^0-9a-z가-힣]', '', w.lower()) for w in s.split()]
+    t = [_SYN.get(w, w) for w in t if w]
+    while len(t) > 1 and t[-1].endswith('점'):
+        t = t[:-1]
+    return t
+
+
+def same_business_name(a, b, match=NAME_MATCH):
+    """두 상호가 같은 사업체로 이어지는가 (비코딩 1의 B열 판정과 대조: 218쌍 중 216쌍 일치)."""
+    ta, tb = name_tokens(a), name_tokens(b)
+    if not ta or not tb:
+        return False
+    ja, jb = ''.join(ta), ''.join(tb)
+    if ja == jb:
+        return True
+    if match == 'strict':
+        return False
+    if sorted(ta) == sorted(tb):
+        return True
+    short, long_ = (ja, jb) if len(ja) <= len(jb) else (jb, ja)
+    return len(short) >= 2 and long_.startswith(short)
+
+
 # ───────────────────────── 4. 3단계 변수 ─────────────────────────
 def count_prior(coh, fails, key, window=WINDOW_DAYS, other_floor=False):
     """coh의 각 가게에 대해, 같은 key(칸 또는 지번)에서 개업일 직전 window일 안에
     '진짜 폐업'한 다른 상호의 가게 수를 센다. (미래 정보 없음: 폐업일 < 개업일)"""
-    left = coh[['row', key, 'od', 'name', 'floor']]
-    right = fails[[key, 'cd', 'name', 'floor']].rename(columns={'cd': 'cd_p', 'name': 'name_p', 'floor': 'floor_p'})
+    nm = 'name_key' if ('name_key' in coh and 'name_key' in fails) else 'name'   # D9: 정규화 상호로 '다른 상호' 판단
+    left = coh[['row', key, 'od', nm, 'floor']].rename(columns={nm: 'name'})
+    right = fails[[key, 'cd', nm, 'floor']].rename(columns={'cd': 'cd_p', nm: 'name_p', 'floor': 'floor_p'})
     m = left.merge(right, on=key)
     ok = (m['cd_p'] < m['od']) & (m['cd_p'] >= m['od'] - pd.Timedelta(days=window)) & (m['name_p'] != m['name'])
     ok &= (m['floor_p'] != m['floor']) if other_floor else True
